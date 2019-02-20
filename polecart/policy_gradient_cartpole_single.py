@@ -6,14 +6,51 @@ import gym
 import math
 import matplotlib.pyplot as plt
 
+class ReplayBuffer(object):
+    def __init__(self, buffer_size=10000):
+        self.states = []
+        self.actions = []
+        self.advantages = []
+        self.transitions = []
+        self.update_vals = []
+        self.buffer_size = buffer_size
+
+    def add_examples(self, states, actions, advantages, transitions, update_vals):
+
+        # Add examples
+        self.states += states
+        self.actions += actions
+        self.advantages += advantages
+        self.transitions += transitions
+        self.update_vals += update_vals
+
+        # Drop if more than buffer size
+        self.states = self.states[-self.buffer_size:]
+        self.actions = self.actions[-self.buffer_size:]
+        self.advantages = self.advantages[-self.buffer_size:]
+        self.transitions = self.transitions[-self.buffer_size:]
+        self.update_vals = self.update_vals[-self.buffer_size:]
+
+    def extract_index_examples(self, arr, indices):
+        return [arr[i] for i in indices]
+
+    def sample_examples(self, n):
+        buffer_length = len(self.actions)
+        random_indices = [random.randint(0, buffer_length-1) for i in range(n)]
+        return (self.extract_index_examples(x, random_indices) for x in
+                [self.states, self.actions, self.advantages,
+                 self.transitions, self.update_vals])
+
 class CartPoleAgentPolicyGradient(object):
 
-    def __init__(self, sess, env, agent_id):
+    def __init__(self, sess, env, replay_buffer, agent_id, seed_sample=False):
         self.agent_id = agent_id
         self.policy_grad = self.policy_gradient()
         self.value_grad = self.value_gradient()
         self.env = env
         self.sess = sess
+        self.seed_sample = seed_sample
+        self.replay_buffer = replay_buffer
 
     def policy_gradient(self):
         with tf.variable_scope("policy_agent_%d" % self.agent_id):
@@ -23,7 +60,8 @@ class CartPoleAgentPolicyGradient(object):
             advantages = tf.placeholder("float",[None,1])
             linear = tf.matmul(state,params)
             probabilities = tf.nn.softmax(linear)
-            good_probabilities = tf.reduce_sum(tf.multiply(probabilities, actions),reduction_indices=[1])
+            good_probabilities = tf.reduce_sum(tf.multiply(probabilities, actions),
+                                               reduction_indices=[1])
             eligibility = tf.log(good_probabilities) * advantages
             loss = -tf.reduce_sum(eligibility)
             optimizer = tf.train.AdamOptimizer(0.01).minimize(loss)
@@ -44,66 +82,96 @@ class CartPoleAgentPolicyGradient(object):
             optimizer = tf.train.AdamOptimizer(0.1).minimize(loss)
             return calculated, state, newvals, optimizer, loss
 
-    def run_episode(self, render=False):
+    def simulate(self, n_episodes=1, render=False):
         env, policy_grad, value_grad, sess = self.env, self.policy_grad, self.value_grad, self.sess
         pl_calculated, pl_state, pl_actions, pl_advantages, pl_optimizer = policy_grad
         vl_calculated, vl_state, vl_newvals, vl_optimizer, vl_loss = value_grad
-        observation = env.reset()
         totalreward = 0
+
+        # Shared buffer of examples
         states = []
         actions = []
         advantages = []
         transitions = []
         update_vals = []
 
+        for ii in range(n_episodes):
+            observation = env.reset()
+            # Run multiple episodes and fill up buffer
+            for _ in range(1000):
+                # calculate policy
+                obs_vector = np.expand_dims(observation, axis=0)
+                probs = sess.run(pl_calculated,feed_dict={pl_state: obs_vector})
+                action = 0 if random.uniform(0,1) < probs[0][0] else 1
+                # record the transition
+                states.append(observation)
+                actionblank = np.zeros(2)
+                actionblank[action] = 1
+                actions.append(actionblank)
+                # take the action in the environment
+                old_observation = observation
+                observation, reward, done, info = env.step(action)
+                transitions.append((old_observation, action, reward))
+                totalreward += reward
 
-        for _ in range(200):
-            # calculate policy
-            obs_vector = np.expand_dims(observation, axis=0)
-            probs = sess.run(pl_calculated,feed_dict={pl_state: obs_vector})
-            action = 0 if random.uniform(0,1) < probs[0][0] else 1
-            # record the transition
-            states.append(observation)
-            actionblank = np.zeros(2)
-            actionblank[action] = 1
-            actions.append(actionblank)
-            # take the action in the environment
-            old_observation = observation
-            observation, reward, done, info = env.step(action)
-            transitions.append((old_observation, action, reward))
-            totalreward += reward
+                if render:
+                    env.render()
 
-            if render:
-                env.render()
+                if done:
+                    break
+            for index, trans in enumerate(transitions):
+                obs, action, reward = trans
 
-            if done:
-                break
-        for index, trans in enumerate(transitions):
-            obs, action, reward = trans
+                # calculate discounted monte-carlo return
+                future_reward = 0
+                future_transitions = len(transitions) - index
+                decrease = 1
+                for index2 in range(future_transitions):
+                    future_reward += transitions[(index2) + index][2] * decrease
+                    decrease = decrease * 0.97
+                obs_vector = np.expand_dims(obs, axis=0)
+                currentval = sess.run(vl_calculated,feed_dict={vl_state: obs_vector})[0][0]
 
-            # calculate discounted monte-carlo return
-            future_reward = 0
-            future_transitions = len(transitions) - index
-            decrease = 1
-            for index2 in range(future_transitions):
-                future_reward += transitions[(index2) + index][2] * decrease
-                decrease = decrease * 0.97
-            obs_vector = np.expand_dims(obs, axis=0)
-            currentval = sess.run(vl_calculated,feed_dict={vl_state: obs_vector})[0][0]
+                # advantage: how much better was this action than normal
+                advantages.append(future_reward - currentval)
 
-            # advantage: how much better was this action than normal
-            advantages.append(future_reward - currentval)
+                # update the value function towards new return
+                update_vals.append(future_reward)
 
-            # update the value function towards new return
-            update_vals.append(future_reward)
+        return states, actions, advantages, transitions, update_vals, totalreward / n_episodes
 
-        # update value function
-        update_vals_vector = np.expand_dims(update_vals, axis=1)
-        sess.run(vl_optimizer, feed_dict={vl_state: states, vl_newvals: update_vals_vector})
-        # real_vl_loss = sess.run(vl_loss, feed_dict={vl_state: states, vl_newvals: update_vals_vector})
+    def update(self,
+               n_episodes_simulation=1,
+               n_updates=1,
+               batch_size=32,
+               render=False):
 
-        advantages_vector = np.expand_dims(advantages, axis=1)
-        sess.run(pl_optimizer, feed_dict={pl_state: states, pl_advantages: advantages_vector, pl_actions: actions})
+        env, policy_grad, value_grad, sess = self.env, self.policy_grad, self.value_grad, self.sess
+        pl_calculated, pl_state, pl_actions, pl_advantages, pl_optimizer = policy_grad
+        vl_calculated, vl_state, vl_newvals, vl_optimizer, vl_loss = value_grad
+
+
+        # Simulate the episodes
+        states, actions, advantages, transitions, update_vals, totalreward = (
+            self.simulate(n_episodes_simulation))
+
+        # Update replay buffer
+        self.replay_buffer.add_examples(states, actions, advantages, transitions, update_vals)
+
+        # Do n_updates updates
+        for i in range(n_updates):
+
+            # Sample examples
+            states, actions, advantages, transitions, update_vals = (
+                self.replay_buffer.sample_examples(batch_size))
+
+            # update value function
+            update_vals_vector = np.expand_dims(update_vals, axis=1)
+            sess.run(vl_optimizer, feed_dict={vl_state: states, vl_newvals: update_vals_vector})
+
+            # Update policy function
+            advantages_vector = np.expand_dims(advantages, axis=1)
+            sess.run(pl_optimizer, feed_dict={pl_state: states, pl_advantages: advantages_vector, pl_actions: actions})
 
         return totalreward
 
@@ -113,14 +181,15 @@ sess = tf.Session()
 env = gym.make('CartPole-v0')
 
 # Create cartpole agent policy grad
-agent = CartPoleAgentPolicyGradient(sess, env, 0)
+replay_buffer = ReplayBuffer()
+agent = CartPoleAgentPolicyGradient(sess, env, replay_buffer, 0)
 
 # Initialize sess variables
 sess.run(tf.initialize_all_variables())
 
 # Train agent
 for i in range(1000):
-    reward = agent.run_episode()
+    reward = agent.update()
     if reward == 200:
         break
     if i % 100 == 0:
@@ -128,4 +197,5 @@ for i in range(1000):
 
 print(reward, i)
 
-agent.run_episode(render=True)
+for i in range(100):
+    agent.simulate(render=True)
