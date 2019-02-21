@@ -65,7 +65,7 @@ class CartPoleAgentPolicyGradient(object):
                                                reduction_indices=[1])
             eligibility = tf.log(good_probabilities) * advantages
             loss = -tf.reduce_sum(eligibility)
-            optimizer = tf.train.AdamOptimizer(0.001).minimize(loss)
+            optimizer = tf.train.AdamOptimizer(0.01).minimize(loss)
             return probabilities, state, actions, advantages, optimizer
 
     def value_gradient(self):
@@ -80,7 +80,7 @@ class CartPoleAgentPolicyGradient(object):
             calculated = tf.matmul(h1,w2) + b2
             diffs = calculated-newvals
             loss = tf.nn.l2_loss(diffs)
-            optimizer = tf.train.AdamOptimizer(0.01).minimize(loss)
+            optimizer = tf.train.AdamOptimizer(0.1).minimize(loss)
             return calculated, state, newvals, optimizer, loss
 
     def simulate(self, n_episodes=1, render=False):
@@ -103,7 +103,9 @@ class CartPoleAgentPolicyGradient(object):
                 # calculate policy
                 obs_vector = np.expand_dims(observation, axis=0)
                 probs = sess.run(pl_calculated,feed_dict={pl_state: obs_vector})
+
                 action = 0 if random.uniform(0,1) < probs[0][0] else 1
+
                 # record the transition
                 states.append(observation)
                 actionblank = np.zeros(2)
@@ -177,7 +179,7 @@ class CartPoleAgentPolicyGradient(object):
         return totalreward
 
 
-n_agents = 10
+n_agents = 2
 
 # Create tf session and env
 sess = tf.Session()
