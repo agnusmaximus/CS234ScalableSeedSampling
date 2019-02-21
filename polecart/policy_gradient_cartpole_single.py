@@ -7,27 +7,24 @@ import math
 import matplotlib.pyplot as plt
 
 class ReplayBuffer(object):
-    def __init__(self, buffer_size=1000):
+    def __init__(self, buffer_size=10000):
         self.states = []
         self.actions = []
-        self.advantages = []
         self.transitions = []
         self.update_vals = []
         self.buffer_size = buffer_size
 
-    def add_examples(self, states, actions, advantages, transitions, update_vals):
+    def add_examples(self, states, actions, transitions, update_vals):
 
         # Add examples
         self.states += states
         self.actions += actions
-        self.advantages += advantages
         self.transitions += transitions
         self.update_vals += update_vals
 
         # Drop if more than buffer size
         self.states = self.states[-self.buffer_size:]
         self.actions = self.actions[-self.buffer_size:]
-        self.advantages = self.advantages[-self.buffer_size:]
         self.transitions = self.transitions[-self.buffer_size:]
         self.update_vals = self.update_vals[-self.buffer_size:]
 
@@ -39,7 +36,7 @@ class ReplayBuffer(object):
         replace = n > buffer_length
         random_indices = np.random.choice(buffer_length, n, replace=replace)
         return (self.extract_index_examples(x, random_indices) for x in
-                [self.states, self.actions, self.advantages,
+                [self.states, self.actions,
                  self.transitions, self.update_vals])
 
 class CartPoleAgentPolicyGradient(object):
@@ -122,6 +119,7 @@ class CartPoleAgentPolicyGradient(object):
 
                 if done:
                     break
+
             for index, trans in enumerate(transitions):
                 obs, action, reward = trans
 
@@ -146,7 +144,7 @@ class CartPoleAgentPolicyGradient(object):
     def update(self,
                n_episodes_simulation=1,
                n_updates=1,
-               batch_size=200,
+               batch_size=1000,
                render=False):
 
         env, policy_grad, value_grad, sess = self.env, self.policy_grad, self.value_grad, self.sess
@@ -159,14 +157,23 @@ class CartPoleAgentPolicyGradient(object):
             self.simulate(n_episodes_simulation))
 
         # Update replay buffer
-        self.replay_buffer.add_examples(states, actions, advantages, transitions, update_vals)
+        self.replay_buffer.add_examples(states, actions, transitions, update_vals)
 
         # Do n_updates updates
         for i in range(n_updates):
 
             # Sample examples
-            #states, actions, advantages, transitions, update_vals = (
-            #    self.replay_buffer.sample_examples(batch_size))
+            states, actions, transitions, update_vals = (
+                self.replay_buffer.sample_examples(batch_size))
+
+            # Compute advantages
+            advantages = []
+            for index, trans in enumerate(transitions):
+                obs, action, reward = trans
+                future_reward = update_vals[index]
+                obs_vector = np.expand_dims(obs, axis=0)
+                currentval = sess.run(vl_calculated,feed_dict={vl_state: obs_vector})[0][0]
+                advantages.append(future_reward - currentval)
 
             # update value function
             update_vals_vector = np.expand_dims(update_vals, axis=1)
@@ -179,7 +186,7 @@ class CartPoleAgentPolicyGradient(object):
         return totalreward
 
 
-n_agents = 2
+n_agents = 1
 
 # Create tf session and env
 sess = tf.Session()
@@ -200,7 +207,7 @@ for i in range(1000000):
     print(rewards)
     reward = np.mean(rewards)
     if reward == 200:
-        break
+        pass
     if i % 100 == 0:
         print("Iteration %d avg reward %f" % (i, reward))
 
