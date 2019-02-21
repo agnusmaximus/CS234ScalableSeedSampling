@@ -7,24 +7,27 @@ import math
 import matplotlib.pyplot as plt
 
 class ReplayBuffer(object):
-    def __init__(self, buffer_size=10000):
+    def __init__(self, buffer_size=1000):
         self.states = []
         self.actions = []
+        self.advantages = []
         self.transitions = []
         self.update_vals = []
         self.buffer_size = buffer_size
 
-    def add_examples(self, states, actions, transitions, update_vals):
+    def add_examples(self, states, actions, advantages, transitions, update_vals):
 
         # Add examples
         self.states += states
         self.actions += actions
+        self.advantages += advantages
         self.transitions += transitions
         self.update_vals += update_vals
 
         # Drop if more than buffer size
         self.states = self.states[-self.buffer_size:]
         self.actions = self.actions[-self.buffer_size:]
+        self.advantages = self.advantages[-self.buffer_size:]
         self.transitions = self.transitions[-self.buffer_size:]
         self.update_vals = self.update_vals[-self.buffer_size:]
 
@@ -36,7 +39,7 @@ class ReplayBuffer(object):
         replace = n > buffer_length
         random_indices = np.random.choice(buffer_length, n, replace=replace)
         return (self.extract_index_examples(x, random_indices) for x in
-                [self.states, self.actions,
+                [self.states, self.actions, self.advantages,
                  self.transitions, self.update_vals])
 
 class CartPoleAgentPolicyGradient(object):
@@ -100,9 +103,7 @@ class CartPoleAgentPolicyGradient(object):
                 # calculate policy
                 obs_vector = np.expand_dims(observation, axis=0)
                 probs = sess.run(pl_calculated,feed_dict={pl_state: obs_vector})
-
                 action = 0 if random.uniform(0,1) < probs[0][0] else 1
-
                 # record the transition
                 states.append(observation)
                 actionblank = np.zeros(2)
@@ -119,7 +120,6 @@ class CartPoleAgentPolicyGradient(object):
 
                 if done:
                     break
-
             for index, trans in enumerate(transitions):
                 obs, action, reward = trans
 
@@ -143,8 +143,8 @@ class CartPoleAgentPolicyGradient(object):
 
     def update(self,
                n_episodes_simulation=1,
-               n_updates=1,
-               batch_size=1000,
+               n_updates=10,
+               batch_size=200,
                render=False):
 
         env, policy_grad, value_grad, sess = self.env, self.policy_grad, self.value_grad, self.sess
@@ -157,20 +157,20 @@ class CartPoleAgentPolicyGradient(object):
             self.simulate(n_episodes_simulation))
 
         # Update replay buffer
-        self.replay_buffer.add_examples(states, actions, transitions, update_vals)
+        self.replay_buffer.add_examples(states, actions, advantages, transitions, update_vals)
 
         # Do n_updates updates
         for i in range(n_updates):
 
             # Sample examples
-            states, actions, transitions, update_vals = (
+            states, actions, advantages, transitions, update_vals = (
                 self.replay_buffer.sample_examples(batch_size))
 
-            # Compute advantages
             advantages = []
             for index, trans in enumerate(transitions):
                 obs, action, reward = trans
                 future_reward = update_vals[index]
+
                 obs_vector = np.expand_dims(obs, axis=0)
                 currentval = sess.run(vl_calculated,feed_dict={vl_state: obs_vector})[0][0]
                 advantages.append(future_reward - currentval)
@@ -199,19 +199,34 @@ agents = [CartPoleAgentPolicyGradient(sess, env, replay_buffer, i) for i in rang
 # Initialize sess variables
 sess.run(tf.initialize_all_variables())
 
+reward_sequences = []
+
+data = []
+iteration = 0
+
 # Train agents
-for i in range(1000000):
+while True:
+
     rewards = []
     for agent in agents:
         rewards.append(agent.update())
-    print(rewards)
     reward = np.mean(rewards)
-    if reward == 200:
-        pass
-    if i % 100 == 0:
-        print("Iteration %d avg reward %f" % (i, reward))
 
-print(reward, i)
+    # Keep track of running average reward
+    reward_sequences.append(reward)
+    reward_sequences = reward_sequences[-50:]
+
+    if iteration % 100 == 0:
+        print(rewards)
+        print("Iteration %d avg reward %f" % (iteration, np.mean(reward_sequences)))
+        data.append((iteration, np.mean(reward_sequences)))
+
+    if np.mean(reward_sequences) >= 190:
+        break
+
+    iteration += 1
 
 for i in range(100):
     agent.simulate(render=True)
+
+print(data)
