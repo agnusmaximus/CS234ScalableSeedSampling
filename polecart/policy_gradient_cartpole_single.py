@@ -7,7 +7,7 @@ import math
 import matplotlib.pyplot as plt
 
 class ReplayBuffer(object):
-    def __init__(self, buffer_size=10000):
+    def __init__(self, buffer_size=1000):
         self.states = []
         self.actions = []
         self.advantages = []
@@ -36,7 +36,8 @@ class ReplayBuffer(object):
 
     def sample_examples(self, n):
         buffer_length = len(self.actions)
-        random_indices = [random.randint(0, buffer_length-1) for i in range(n)]
+        replace = n > buffer_length
+        random_indices = np.random.choice(buffer_length, n, replace=replace)
         return (self.extract_index_examples(x, random_indices) for x in
                 [self.states, self.actions, self.advantages,
                  self.transitions, self.update_vals])
@@ -64,7 +65,7 @@ class CartPoleAgentPolicyGradient(object):
                                                reduction_indices=[1])
             eligibility = tf.log(good_probabilities) * advantages
             loss = -tf.reduce_sum(eligibility)
-            optimizer = tf.train.AdamOptimizer(0.01).minimize(loss)
+            optimizer = tf.train.AdamOptimizer(0.001).minimize(loss)
             return probabilities, state, actions, advantages, optimizer
 
     def value_gradient(self):
@@ -77,9 +78,9 @@ class CartPoleAgentPolicyGradient(object):
             w2 = tf.get_variable("w2",[10,1])
             b2 = tf.get_variable("b2",[1])
             calculated = tf.matmul(h1,w2) + b2
-            diffs = calculated - newvals
+            diffs = calculated-newvals
             loss = tf.nn.l2_loss(diffs)
-            optimizer = tf.train.AdamOptimizer(0.1).minimize(loss)
+            optimizer = tf.train.AdamOptimizer(0.01).minimize(loss)
             return calculated, state, newvals, optimizer, loss
 
     def simulate(self, n_episodes=1, render=False):
@@ -143,7 +144,7 @@ class CartPoleAgentPolicyGradient(object):
     def update(self,
                n_episodes_simulation=1,
                n_updates=1,
-               batch_size=32,
+               batch_size=200,
                render=False):
 
         env, policy_grad, value_grad, sess = self.env, self.policy_grad, self.value_grad, self.sess
@@ -162,8 +163,8 @@ class CartPoleAgentPolicyGradient(object):
         for i in range(n_updates):
 
             # Sample examples
-            states, actions, advantages, transitions, update_vals = (
-                self.replay_buffer.sample_examples(batch_size))
+            #states, actions, advantages, transitions, update_vals = (
+            #    self.replay_buffer.sample_examples(batch_size))
 
             # update value function
             update_vals_vector = np.expand_dims(update_vals, axis=1)
@@ -176,24 +177,30 @@ class CartPoleAgentPolicyGradient(object):
         return totalreward
 
 
+n_agents = 10
+
 # Create tf session and env
 sess = tf.Session()
 env = gym.make('CartPole-v0')
 
 # Create cartpole agent policy grad
 replay_buffer = ReplayBuffer()
-agent = CartPoleAgentPolicyGradient(sess, env, replay_buffer, 0)
+agents = [CartPoleAgentPolicyGradient(sess, env, replay_buffer, i) for i in range(n_agents)]
 
 # Initialize sess variables
 sess.run(tf.initialize_all_variables())
 
-# Train agent
-for i in range(1000):
-    reward = agent.update()
+# Train agents
+for i in range(1000000):
+    rewards = []
+    for agent in agents:
+        rewards.append(agent.update())
+    print(rewards)
+    reward = np.mean(rewards)
     if reward == 200:
         break
     if i % 100 == 0:
-        print("Iteration %d reward %f" % (i, reward))
+        print("Iteration %d avg reward %f" % (i, reward))
 
 print(reward, i)
 
