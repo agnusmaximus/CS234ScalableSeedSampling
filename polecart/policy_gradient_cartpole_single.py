@@ -7,7 +7,7 @@ import math
 import matplotlib.pyplot as plt
 
 class ReplayBuffer(object):
-    def __init__(self, buffer_size=1000):
+    def __init__(self, buffer_size=10000):
         self.states = []
         self.actions = []
         self.advantages = []
@@ -141,23 +141,23 @@ class CartPoleAgentPolicyGradient(object):
 
         return states, actions, advantages, transitions, update_vals, totalreward / n_episodes
 
-    def update(self,
-               n_episodes_simulation=1,
-               n_updates=10,
-               batch_size=200,
-               render=False):
-
-        env, policy_grad, value_grad, sess = self.env, self.policy_grad, self.value_grad, self.sess
-        pl_calculated, pl_state, pl_actions, pl_advantages, pl_optimizer = policy_grad
-        vl_calculated, vl_state, vl_newvals, vl_optimizer, vl_loss = value_grad
-
-
+    def simulate_fill_buffer(self, n_episodes_simulation=1):
         # Simulate the episodes
         states, actions, advantages, transitions, update_vals, totalreward = (
             self.simulate(n_episodes_simulation))
 
         # Update replay buffer
         self.replay_buffer.add_examples(states, actions, advantages, transitions, update_vals)
+        return totalreward
+
+    def update(self,
+               n_updates=10,
+               batch_size=32,
+               render=False):
+
+        env, policy_grad, value_grad, sess = self.env, self.policy_grad, self.value_grad, self.sess
+        pl_calculated, pl_state, pl_actions, pl_advantages, pl_optimizer = policy_grad
+        vl_calculated, vl_state, vl_newvals, vl_optimizer, vl_loss = value_grad
 
         def batch(iterable, n=1):
             l = len(iterable)
@@ -173,8 +173,9 @@ class CartPoleAgentPolicyGradient(object):
 
             advantages = []
 
-            for trans_batch, future_reward_batch in zip(batch(transitions, 500),
-                                                        batch(update_vals, 500)):
+            # Re-calculate advantages
+            for trans_batch, future_reward_batch in zip(batch(transitions, batch_size),
+                                                        batch(update_vals, batch_size)):
                 obs_batch = [x[0] for x in trans_batch]
                 action_batch = [x[1] for x in trans_batch]
                 reward_batch = [x[2] for x in trans_batch]
@@ -192,10 +193,7 @@ class CartPoleAgentPolicyGradient(object):
             advantages_vector = np.expand_dims(advantages, axis=1)
             sess.run(pl_optimizer, feed_dict={pl_state: states, pl_advantages: advantages_vector, pl_actions: actions})
 
-        return totalreward
-
-
-n_agents = 1
+n_agents = 8
 
 # Create tf session and env
 sess = tf.Session()
@@ -208,7 +206,7 @@ agents = [CartPoleAgentPolicyGradient(sess, env, replay_buffer, i) for i in rang
 # Initialize sess variables
 sess.run(tf.initialize_all_variables())
 
-reward_sequences = []
+reward_sequences = [[] for i in range(n_agents)]
 
 data = []
 iteration = 0
@@ -218,24 +216,28 @@ while True:
 
     rewards = []
     for agent in agents:
-        rewards.append(agent.update())
-    reward = np.mean(rewards)
+        rewards.append(agent.simulate_fill_buffer())
+    for agent in agents:
+        agent.update()
 
-    # Keep track of running average reward
-    reward_sequences.append(reward)
-    reward_sequences = reward_sequences[-50:]
+    # Keep track of running average reward per agent
+    for reward_sequence, reward in zip(reward_sequences, rewards):
+        reward_sequence.append(reward)
+        if len(reward_sequence) >= 100:
+            reward_sequence.pop(0)
+
+    # Calculate running averages
+    running_averages = [np.mean(x) for x in reward_sequences]
 
     if iteration % 100 == 0:
-        print(rewards)
-        print("Iteration %d avg reward %f" % (iteration, np.mean(reward_sequences)))
-        data.append((iteration, np.mean(reward_sequences)))
+        print("Iteration %d avg reward %f" % (iteration, np.max(running_averages)))
+        data.append((iteration, np.max(running_averages)))
 
-    if np.mean(reward_sequences) >= 190:
+    if np.max(running_averages) >= 195:
         break
 
     iteration += 1
 
-for i in range(100):
-    agent.simulate(render=True)
-
 print(data)
+
+agents[0].simulate(render=True)
