@@ -159,6 +159,11 @@ class CartPoleAgentPolicyGradient(object):
         # Update replay buffer
         self.replay_buffer.add_examples(states, actions, advantages, transitions, update_vals)
 
+        def batch(iterable, n=1):
+            l = len(iterable)
+            for ndx in range(0, l, n):
+                yield iterable[ndx:min(ndx + n, l)]
+
         # Do n_updates updates
         for i in range(n_updates):
 
@@ -167,13 +172,17 @@ class CartPoleAgentPolicyGradient(object):
                 self.replay_buffer.sample_examples(batch_size))
 
             advantages = []
-            for index, trans in enumerate(transitions):
-                obs, action, reward = trans
-                future_reward = update_vals[index]
 
-                obs_vector = np.expand_dims(obs, axis=0)
-                currentval = sess.run(vl_calculated,feed_dict={vl_state: obs_vector})[0][0]
-                advantages.append(future_reward - currentval)
+            for trans_batch, future_reward_batch in zip(batch(transitions, 500),
+                                                        batch(update_vals, 500)):
+                obs_batch = [x[0] for x in trans_batch]
+                action_batch = [x[1] for x in trans_batch]
+                reward_batch = [x[2] for x in trans_batch]
+                obs_vectors = np.stack(obs_batch, axis=0)
+                currentvals = sess.run(vl_calculated, feed_dict={vl_state: obs_vectors})
+
+                for ind, future_reward in enumerate(future_reward_batch):
+                    advantages.append(future_reward-currentvals[ind][0])
 
             # update value function
             update_vals_vector = np.expand_dims(update_vals, axis=1)
