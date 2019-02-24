@@ -1,4 +1,5 @@
 import tensorflow as tf
+import sys
 import time
 import numpy as np
 import random
@@ -193,7 +194,7 @@ class CartPoleAgentPolicyGradient(object):
             advantages_vector = np.expand_dims(advantages, axis=1)
             sess.run(pl_optimizer, feed_dict={pl_state: states, pl_advantages: advantages_vector, pl_actions: actions})
 
-n_agents = 8
+n_agents = int(sys.argv[1])
 
 # Create tf session and env
 sess = tf.Session()
@@ -231,13 +232,13 @@ while True:
 
     if iteration % 100 == 0:
         print("Iteration %d avg reward %f" % (iteration, np.max(running_averages)))
-        data.append((iteration, np.max(running_averages)))
+
+    data.append((iteration, np.max(running_averages)))
 
     if np.max(running_averages) >= 195:
         break
 
     iteration += 1
 
+#agents[0].simulate(render=True)
 print(data)
-
-agents[0].simulate(render=True)
