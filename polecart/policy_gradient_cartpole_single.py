@@ -101,6 +101,9 @@ class CartPoleAgentPolicyGradient(object):
         advantages = []
         transitions = []
         update_vals = []
+        action_history = []
+
+        orig_prob = 1.0
 
         for ii in range(n_episodes):
             observation = env.reset(**reset_args)
@@ -111,8 +114,13 @@ class CartPoleAgentPolicyGradient(object):
                 obs_vector = np.expand_dims(observation, axis=0)
                 probs = sess.run(pl_calculated,feed_dict={pl_state: obs_vector})
                 action = 0 if random.uniform(0,1) < probs[0][0] else 1
+                if action == 0:
+                    orig_prob *= probs[0][0]
+                else:
+                    orig_prob *= 1-probs[0][0]
 
                 # record the transition
+                action_history.append(action)
                 states.append(observation)
                 actionblank = np.zeros(2)
                 actionblank[action] = 1
@@ -121,7 +129,7 @@ class CartPoleAgentPolicyGradient(object):
                 # take the action in the environment
                 old_observation = observation
                 observation, reward, done, info = env.step(action)
-                transitions.append((old_observation, action, reward))
+                transitions.append((old_observation, action, orig_prob, list(states), list(action_history), reward))
                 totalreward += reward
 
                 if render:
@@ -130,7 +138,7 @@ class CartPoleAgentPolicyGradient(object):
                 if done:
                     break
             for index, trans in enumerate(transitions):
-                obs, action, reward = trans
+                obs, action, orig_prob, history, action_history, reward = trans
 
                 # calculate discounted monte-carlo return
                 future_reward = 0
@@ -187,12 +195,43 @@ class CartPoleAgentPolicyGradient(object):
                                                         batch(update_vals, batch_size)):
                 obs_batch = [x[0] for x in trans_batch]
                 action_batch = [x[1] for x in trans_batch]
-                reward_batch = [x[2] for x in trans_batch]
+                probs_batch = [x[2] for x in trans_batch]
+                history_batch = [x[3] for x in trans_batch]
+                action_history_batch = [x[4] for x in trans_batch]
+                reward_batch = [x[5] for x in trans_batch]
                 obs_vectors = np.stack(obs_batch, axis=0)
+
+                # Calcluate current vals
                 currentvals = sess.run(vl_calculated, feed_dict={vl_state: obs_vectors})
 
+                # Calculate probability of going through this sequence of states
+                """
+                target_probs_batch = []
+                for history_example, action_example in zip(history_batch, action_history_batch):
+
+                    # Batch evaluate probs
+                    history_obs_batch = [x for x in history_example]
+                    history_obs_vectors = np.stack(history_obs_batch, axis=0)
+                    probs = sess.run(pl_calculated, feed_dict={pl_state: history_obs_vectors})
+
+                    # Take product of probs
+                    prod = 1.0
+                    for p0_p1, action in zip(probs, action_example):
+                        prod *= p0_p1[action]
+                    target_probs_batch.append(prod)
+                target_probs_batch = np.array(target_probs_batch).reshape(-1, 1)
+                """
+
                 for ind, future_reward in enumerate(future_reward_batch):
-                    advantages.append(future_reward-currentvals[ind][0])
+                    # Old code
+                    # advantages.append(future_reward-currentvals[ind][0])
+
+                    # Reweighting
+                    #weight = probs_batch[ind] / target_probs_batch[ind][0]
+                    assert(probs_batch[ind] != 0)
+                    #weight = target_probs_batch[ind][0] / probs_batch[ind]
+                    weight = 1
+                    advantages.append((future_reward-currentvals[ind][0]) * weight)
 
             # update value function
             update_vals_vector = np.expand_dims(update_vals, axis=1)
@@ -206,8 +245,8 @@ n_agents = int(sys.argv[1])
 
 # Create tf session and env
 sess = tf.Session()
-#env = gym.make('CartPole-v0')
-env = gym.make('polecart_harder-v0')
+env = gym.make('CartPole-v0')
+#env = gym.make('polecart_harder-v0')
 
 # Create cartpole agent policy grad
 replay_buffer = ReplayBuffer()
@@ -246,10 +285,15 @@ while True:
 
     data.append((iteration, np.max(running_averages)))
 
-    if np.max(running_averages) >= 195 or iteration >= 5000:
+    if np.max(running_averages) >= 195*10 or iteration >= 1000:
         break
 
     iteration += 1
 
-agents[0].simulate(render=True, reset_args={"start_angle" : 90})
+agents[0].simulate(render=True)
+#agents[0].simulate(render=True, reset_args={"start_angle" : 90})
+#agents[0].simulate(render=True, reset_args={})
+#agents[0].simulate(render=True, reset_args={})
+#agents[0].simulate(render=True, reset_args={})
+#agents[0].simulate(render=True, reset_args={})
 #print(data)

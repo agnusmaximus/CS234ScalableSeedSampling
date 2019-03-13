@@ -121,7 +121,7 @@ class MyCartPoleEnv(gym.Env):
         elif self.steps_beyond_done is None:
             # Pole just fell!
             self.steps_beyond_done = 0
-            reward = 1.0
+            reward = -1.0
         else:
             if self.steps_beyond_done == 0:
                 logger.warn("You are calling 'step()' even though this environment has already returned done = True. You should always call 'reset()' once you receive 'done = True' -- any further steps are undefined behavior.")
@@ -133,9 +133,9 @@ class MyCartPoleEnv(gym.Env):
     def reset(self, start_angle=None):
         self.state = self.np_random.uniform(low=-0.05, high=0.05, size=(4,))
         if start_angle is None:
-            self.state[2] = self.np_random.uniform(low=0, high=360) * 2 * math.pi / 360
+            #self.state[2] = self.np_random.uniform(low=0, high=360) * 2 * math.pi / 360
+            pass
         else:
-            print(start_angle)
             self.state[2] = start_angle * 2 * math.pi / 360
         self.steps_beyond_done = None
         return np.array(self.state)
