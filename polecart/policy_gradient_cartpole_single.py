@@ -4,8 +4,13 @@ import time
 import numpy as np
 import random
 import gym
+import polecart_env_harder
 import math
 import matplotlib.pyplot as plt
+from gym import envs
+
+#gym.make("polecart_env_harder:polecart_harder-v0")
+
 
 class ReplayBuffer(object):
     def __init__(self, buffer_size=10000):
@@ -84,7 +89,7 @@ class CartPoleAgentPolicyGradient(object):
             optimizer = tf.train.AdamOptimizer(0.1).minimize(loss)
             return calculated, state, newvals, optimizer, loss
 
-    def simulate(self, n_episodes=1, render=False):
+    def simulate(self, n_episodes=1, render=False, reset_args={}):
         env, policy_grad, value_grad, sess = self.env, self.policy_grad, self.value_grad, self.sess
         pl_calculated, pl_state, pl_actions, pl_advantages, pl_optimizer = policy_grad
         vl_calculated, vl_state, vl_newvals, vl_optimizer, vl_loss = value_grad
@@ -98,18 +103,21 @@ class CartPoleAgentPolicyGradient(object):
         update_vals = []
 
         for ii in range(n_episodes):
-            observation = env.reset()
+            observation = env.reset(**reset_args)
             # Run multiple episodes and fill up buffer
             for _ in range(1000):
+
                 # calculate policy
                 obs_vector = np.expand_dims(observation, axis=0)
                 probs = sess.run(pl_calculated,feed_dict={pl_state: obs_vector})
                 action = 0 if random.uniform(0,1) < probs[0][0] else 1
+
                 # record the transition
                 states.append(observation)
                 actionblank = np.zeros(2)
                 actionblank[action] = 1
                 actions.append(actionblank)
+
                 # take the action in the environment
                 old_observation = observation
                 observation, reward, done, info = env.step(action)
@@ -198,11 +206,14 @@ n_agents = int(sys.argv[1])
 
 # Create tf session and env
 sess = tf.Session()
-env = gym.make('CartPole-v0')
+#env = gym.make('CartPole-v0')
+env = gym.make('polecart_harder-v0')
 
 # Create cartpole agent policy grad
 replay_buffer = ReplayBuffer()
 agents = [CartPoleAgentPolicyGradient(sess, env, replay_buffer, i) for i in range(n_agents)]
+#replay_buffer = ReplayBuffer()
+#agents = [CartPoleAgentPolicyGradient(sess, env, ReplayBuffer(), i) for i in range(n_agents)]
 
 # Initialize sess variables
 sess.run(tf.initialize_all_variables())
@@ -235,10 +246,10 @@ while True:
 
     data.append((iteration, np.max(running_averages)))
 
-    if np.max(running_averages) >= 195:
+    if np.max(running_averages) >= 195 or iteration >= 5000:
         break
 
     iteration += 1
 
-#agents[0].simulate(render=True)
-print(data)
+agents[0].simulate(render=True, reset_args={"start_angle" : 90})
+#print(data)

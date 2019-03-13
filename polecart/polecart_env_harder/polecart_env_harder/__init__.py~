@@ -1,0 +1,6 @@
+from gym.envs.registration import register
+
+register(
+    id='polecart_harder-v0',
+    entry_point='polecart_env_harder.envs:polecart_harder',
+)

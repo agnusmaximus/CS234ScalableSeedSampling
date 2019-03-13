@@ -1,0 +1,5 @@
+polecart_env_harder.egg-info/PKG-INFO
+polecart_env_harder.egg-info/SOURCES.txt
+polecart_env_harder.egg-info/dependency_links.txt
+polecart_env_harder.egg-info/requires.txt
+polecart_env_harder.egg-info/top_level.txt
