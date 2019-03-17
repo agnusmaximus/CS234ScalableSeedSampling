@@ -13,7 +13,7 @@ from gym import envs
 
 
 class ReplayBuffer(object):
-    def __init__(self, buffer_size=10000):
+    def __init__(self, buffer_size=100000):
         self.states = []
         self.actions = []
         self.advantages = []
@@ -93,7 +93,6 @@ class CartPoleAgentPolicyGradient(object):
         env, policy_grad, value_grad, sess = self.env, self.policy_grad, self.value_grad, self.sess
         pl_calculated, pl_state, pl_actions, pl_advantages, pl_optimizer = policy_grad
         vl_calculated, vl_state, vl_newvals, vl_optimizer, vl_loss = value_grad
-        totalreward = 0
 
         # Shared buffer of examples
         states = []
@@ -103,11 +102,11 @@ class CartPoleAgentPolicyGradient(object):
         update_vals = []
         action_history = []
 
-        orig_prob = 1.0
-
         for ii in range(n_episodes):
             observation = env.reset(**reset_args)
             # Run multiple episodes and fill up buffer
+            orig_prob = 1.0
+            totalreward = 0
             for _ in range(1000):
 
                 # calculate policy
@@ -129,7 +128,7 @@ class CartPoleAgentPolicyGradient(object):
                 # take the action in the environment
                 old_observation = observation
                 observation, reward, done, info = env.step(action)
-                transitions.append((old_observation, action, orig_prob, list(states), list(action_history), reward))
+                transitions.append((old_observation, action, reward, orig_prob, list(states), list(action_history)))
                 totalreward += reward
 
                 if render:
@@ -138,7 +137,8 @@ class CartPoleAgentPolicyGradient(object):
                 if done:
                     break
             for index, trans in enumerate(transitions):
-                obs, action, orig_prob, history, action_history, reward = trans
+                #obs, action, orig_prob, history, action_history, reward = trans
+                obs, action, reward, orig_prob, history, action_history = trans
 
                 # calculate discounted monte-carlo return
                 future_reward = 0
@@ -195,17 +195,16 @@ class CartPoleAgentPolicyGradient(object):
                                                         batch(update_vals, batch_size)):
                 obs_batch = [x[0] for x in trans_batch]
                 action_batch = [x[1] for x in trans_batch]
-                probs_batch = [x[2] for x in trans_batch]
-                history_batch = [x[3] for x in trans_batch]
-                action_history_batch = [x[4] for x in trans_batch]
-                reward_batch = [x[5] for x in trans_batch]
+                reward_batch = [x[2] for x in trans_batch]
+                probs_batch = [x[3] for x in trans_batch]
+                history_batch = [x[4] for x in trans_batch]
+                action_history_batch = [x[5] for x in trans_batch]
                 obs_vectors = np.stack(obs_batch, axis=0)
 
                 # Calcluate current vals
                 currentvals = sess.run(vl_calculated, feed_dict={vl_state: obs_vectors})
 
                 # Calculate probability of going through this sequence of states
-                """
                 target_probs_batch = []
                 for history_example, action_example in zip(history_batch, action_history_batch):
 
@@ -220,16 +219,17 @@ class CartPoleAgentPolicyGradient(object):
                         prod *= p0_p1[action]
                     target_probs_batch.append(prod)
                 target_probs_batch = np.array(target_probs_batch).reshape(-1, 1)
-                """
 
                 for ind, future_reward in enumerate(future_reward_batch):
                     # Old code
                     # advantages.append(future_reward-currentvals[ind][0])
 
                     # Reweighting
-                    #weight = probs_batch[ind] / target_probs_batch[ind][0]
-                    assert(probs_batch[ind] != 0)
-                    #weight = target_probs_batch[ind][0] / probs_batch[ind]
+                    #weight = probs_batch[ind] / (target_probs_batch[ind][0] + 1e-10)
+                    weight = target_probs_batch[ind][0] / (probs_batch[ind])
+                    if math.isnan(weight):
+                        weight = 4
+                    weight = max(weight, 4)
                     weight = 1
                     advantages.append((future_reward-currentvals[ind][0]) * weight)
 
