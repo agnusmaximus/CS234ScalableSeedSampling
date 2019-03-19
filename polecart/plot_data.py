@@ -29,7 +29,7 @@ def load_data_avg(v):
 def plot_data(data):
     workers = sorted(data.keys())
     for worker in workers:
-        legend = "par=%d" % worker
+        legend = "%s" % worker
         plot_individual_datum(data[worker], legend)
     plt.title("Cart Pole with Simulated Parallelism")
     plt.xlabel("Number of iterations")
@@ -42,9 +42,7 @@ def plot_individual_datum(data, name):
     y_values = [d[1] for d in data]
     plt.plot(x_values, y_values, label=name)
 
-files = {1:["1_out_%d" % i for i in range(1,11)],
-         2:["2_out_%d" % i for i in range(1,11)],
-         4:["4_out_%d" % i for i in range(1,11)],
-         8:["8_out_%d" % i for i in range(1,11)]}
+files = {"baseline_par4":["4_out_%d" % i for i in range(1,5)],
+         "reweighted_par4":["4_out_reweight_%d" % i for i in range(1,5)]}
 data = {k:load_data_avg(v) for k,v in files.items()}
 plot_data(data)

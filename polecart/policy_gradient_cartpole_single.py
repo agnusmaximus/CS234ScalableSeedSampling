@@ -13,7 +13,7 @@ from gym import envs
 
 
 class ReplayBuffer(object):
-    def __init__(self, buffer_size=100000):
+    def __init__(self, buffer_size=1000000000000):
         self.states = []
         self.actions = []
         self.advantages = []
@@ -50,7 +50,7 @@ class ReplayBuffer(object):
 
 class CartPoleAgentPolicyGradient(object):
 
-    def __init__(self, sess, env, replay_buffer, agent_id, seed_sample=False):
+    def __init__(self, sess, env, replay_buffer, agent_id, reweight=0, seed_sample=False):
         self.agent_id = agent_id
         self.policy_grad = self.policy_gradient()
         self.value_grad = self.value_gradient()
@@ -58,6 +58,7 @@ class CartPoleAgentPolicyGradient(object):
         self.sess = sess
         self.seed_sample = seed_sample
         self.replay_buffer = replay_buffer
+        self.reweight = reweight
 
     def policy_gradient(self):
         with tf.variable_scope("policy_agent_%d" % self.agent_id):
@@ -169,7 +170,7 @@ class CartPoleAgentPolicyGradient(object):
 
     def update(self,
                n_updates=10,
-               batch_size=32,
+               batch_size=16,
                render=False):
 
         env, policy_grad, value_grad, sess = self.env, self.policy_grad, self.value_grad, self.sess
@@ -189,6 +190,7 @@ class CartPoleAgentPolicyGradient(object):
                 self.replay_buffer.sample_examples(batch_size))
 
             advantages = []
+            reweights = []
 
             # Re-calculate advantages
             for trans_batch, future_reward_batch in zip(batch(transitions, batch_size),
@@ -227,11 +229,17 @@ class CartPoleAgentPolicyGradient(object):
                     # Reweighting
                     #weight = probs_batch[ind] / (target_probs_batch[ind][0] + 1e-10)
                     weight = target_probs_batch[ind][0] / (probs_batch[ind])
-                    if math.isnan(weight):
-                        weight = 4
-                    weight = max(weight, 4)
-                    weight = 1
-                    advantages.append((future_reward-currentvals[ind][0]) * weight)
+                    reweights.append(weight)
+                    advantages.append((future_reward-currentvals[ind][0]))
+
+            # Resample
+            if self.reweight:
+                reweights = np.array(reweights) / np.sum(reweights)
+                sampled = np.random.choice(reweights.shape[-1], reweights.shape[-1], p=reweights)
+                update_vals = [update_vals[i] for i in sampled]
+                states = [states[i] for i in sampled]
+                advantages = [advantages[i] for i in sampled]
+                actions = [actions[i] for i in sampled]
 
             # update value function
             update_vals_vector = np.expand_dims(update_vals, axis=1)
@@ -242,6 +250,7 @@ class CartPoleAgentPolicyGradient(object):
             sess.run(pl_optimizer, feed_dict={pl_state: states, pl_advantages: advantages_vector, pl_actions: actions})
 
 n_agents = int(sys.argv[1])
+reweight = int(sys.argv[2])
 
 # Create tf session and env
 sess = tf.Session()
@@ -250,7 +259,7 @@ env = gym.make('CartPole-v0')
 
 # Create cartpole agent policy grad
 replay_buffer = ReplayBuffer()
-agents = [CartPoleAgentPolicyGradient(sess, env, replay_buffer, i) for i in range(n_agents)]
+agents = [CartPoleAgentPolicyGradient(sess, env, replay_buffer, i, reweight=reweight) for i in range(n_agents)]
 #replay_buffer = ReplayBuffer()
 #agents = [CartPoleAgentPolicyGradient(sess, env, ReplayBuffer(), i) for i in range(n_agents)]
 
@@ -261,6 +270,8 @@ reward_sequences = [[] for i in range(n_agents)]
 
 data = []
 iteration = 0
+success = 0
+iterations_past_success = 0
 
 # Train agents
 while True:
@@ -285,15 +296,23 @@ while True:
 
     data.append((iteration, np.max(running_averages)))
 
-    if np.max(running_averages) >= 195*10 or iteration >= 1000:
+    #if np.max(running_averages) >= 195*10 or iteration >= 1000:
+    #    break
+    if np.max(running_averages) >= 195:
+        success = 1
+
+    if success == 1:
+        iterations_past_success += 1
+
+    if success and iterations_past_success >= 1000:
         break
 
     iteration += 1
 
-agents[0].simulate(render=True)
+#agents[0].simulate(render=True)
 #agents[0].simulate(render=True, reset_args={"start_angle" : 90})
 #agents[0].simulate(render=True, reset_args={})
 #agents[0].simulate(render=True, reset_args={})
 #agents[0].simulate(render=True, reset_args={})
 #agents[0].simulate(render=True, reset_args={})
-#print(data)
+print(data)
